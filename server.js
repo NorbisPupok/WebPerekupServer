@@ -1,29 +1,28 @@
 
-// server.js
+// server.js для API-сервера
 const express = require('express');
 const cors = require('cors');
-const axios = require('axios');
-const { Pool } = require('pg'); // <-- Импортируем Pool для PostgreSQL
+const axios = require('axios'); // Убедитесь, что axios установлен
+const { Pool } = require('pg');
 
 const app = express();
-const port = 3001; // Этот порт используется внутри Render
+const port = 3001; // Внутренний порт, который использует Render
 
 // --- Настройка ---
 app.use(cors());
 app.use(express.json());
 
 // --- Переменные окружения ---
-// Render автоматически подставит их
 const WEB_API_KEY = process.env.WEB_API_KEY;
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const CHANNEL_CHAT_ID = parseInt(process.env.CHANNEL_CHAT_ID, 10); // ID канала должен быть числом
-const DATABASE_URL = process.env.DATABASE_URL; // <-- URL для подключения к БД
+const CHANNEL_CHAT_ID = parseInt(process.env.CHANNEL_CHAT_ID, 10);
+const DATABASE_URL = process.env.DATABASE_URL;
 
 // --- Подключение к PostgreSQL ---
 const pool = new Pool({
   connectionString: DATABASE_URL,
   ssl: {
-    rejectUnauthorized: false // Требуется для подключения к Render's PostgreSQL
+    rejectUnauthorized: false
   }
 });
 
@@ -53,7 +52,7 @@ pool.query(createTableQuery, (err, res) => {
 
 // --- API Эндпоинты ---
 
-// ЭНДПОИНТ ДЛЯ ПРИЕМА ДАННЫХ ОТ БОТА
+// POST: Принимаем новую заявку от бота
 app.post('/api/submissions', async (req, res) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -81,45 +80,30 @@ app.post('/api/submissions', async (req, res) => {
     }
 });
 
-// ЭНДПОИНТ ДЛЯ ПОЛУЧЕНИЯ ДАННЫХ
-// --- ЭНДПОИНТ-ПРОКСИ ДЛЯ КАРТИНОК ---
-app.get('/api/photo/:file_path', async (req, res) => {
-    const { file_path } = req.params;
-    const telegramUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file_path}`;
-
+// GET: Отдаем все заявки для сайта
+app.get('/api/submissions', async (req, res) => {
     try {
-        // Используем axios для запроса картинки
-        const response = await axios({
-            method: 'get',
-            url: telegramUrl,
-            responseType: 'stream' // Важно! Получаем картинку как поток данных
+        const result = await pool.query("SELECT * FROM submissions WHERE status = 'pending' ORDER BY created_at DESC");
+        res.json({
+            message: "success",
+            data: result.rows
         });
-
-        // Устанавливаем правильный заголовок Content-Type
-        res.setHeader('Content-Type', response.headers['content-type']);
-        
-        // Отправляем картинку клиенту
-        response.data.pipe(res);
-
-    } catch (error) {
-        console.error('Ошибка при получении фото из Telegram:', error.message);
-        res.status(404).send('Фото не найдено');
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
     }
 });
 
-
-// --- ЭНДПОИНТ ДЛЯ ОДОБРЕНИЯ ---
+// POST: Одобряем заявку
 app.post('/api/submissions/:id/approve', async (req, res) => {
     const submissionId = req.params.id;
     try {
-        // 1. Находим заявку
         const findResult = await pool.query("SELECT * FROM submissions WHERE id = $1", [submissionId]);
         if (findResult.rows.length === 0) {
             return res.status(404).json({ error: 'Заявка не найдена' });
         }
         const submission = findResult.rows[0];
 
-        // 2. Отправляем в Telegram
         const caption = `🌐 Сервер: ${submission.server}\n🚗 Автомобиль: ${submission.car}\n💰 Цена: ${submission.price}\n👤 Покупатель: ${submission.user_name}`;
         await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, {
             chat_id: CHANNEL_CHAT_ID,
@@ -128,7 +112,6 @@ app.post('/api/submissions/:id/approve', async (req, res) => {
         });
         console.log(`Заявка ${submissionId} отправлена в канал.`);
 
-        // 3. Удаляем из БД
         await pool.query("DELETE FROM submissions WHERE id = $1", [submissionId]);
         res.status(200).json({ success: true });
 
@@ -138,7 +121,7 @@ app.post('/api/submissions/:id/approve', async (req, res) => {
     }
 });
 
-// --- ЭНДПОИНТ ДЛЯ ОТКЛОНЕНИЯ ---
+// POST: Отклоняем заявку
 app.post('/api/submissions/:id/reject', async (req, res) => {
     const submissionId = req.params.id;
     try {
@@ -150,6 +133,26 @@ app.post('/api/submissions/:id/reject', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// GET: Прокси для картинок
+app.get('/api/photo/:file_path', async (req, res) => {
+    const { file_path } = req.params;
+    const telegramUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file_path}`;
+
+    try {
+        const response = await axios({
+            method: 'get',
+            url: telegramUrl,
+            responseType: 'stream'
+        });
+        res.setHeader('Content-Type', response.headers['content-type']);
+        response.data.pipe(res);
+    } catch (error) {
+        console.error('Ошибка при получении фото из Telegram:', error.message);
+        res.status(404).send('Фото не найдено');
+    }
+});
+
 
 // --- Запуск сервера ---
 app.listen(port, () => {
