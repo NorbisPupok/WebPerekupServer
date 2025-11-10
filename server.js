@@ -82,18 +82,31 @@ app.post('/api/submissions', async (req, res) => {
 });
 
 // ЭНДПОИНТ ДЛЯ ПОЛУЧЕНИЯ ДАННЫХ
-app.get('/api/submissions', async (req, res) => {
+// --- ЭНДПОИНТ-ПРОКСИ ДЛЯ КАРТИНОК ---
+app.get('/api/photo/:file_path', async (req, res) => {
+    const { file_path } = req.params;
+    const telegramUrl = `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${file_path}`;
+
     try {
-        const result = await pool.query("SELECT * FROM submissions WHERE status = 'pending' ORDER BY created_at DESC");
-        res.json({
-            message: "success",
-            data: result.rows
+        // Используем axios для запроса картинки
+        const response = await axios({
+            method: 'get',
+            url: telegramUrl,
+            responseType: 'stream' // Важно! Получаем картинку как поток данных
         });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: err.message });
+
+        // Устанавливаем правильный заголовок Content-Type
+        res.setHeader('Content-Type', response.headers['content-type']);
+        
+        // Отправляем картинку клиенту
+        response.data.pipe(res);
+
+    } catch (error) {
+        console.error('Ошибка при получении фото из Telegram:', error.message);
+        res.status(404).send('Фото не найдено');
     }
 });
+
 
 // --- ЭНДПОИНТ ДЛЯ ОДОБРЕНИЯ ---
 app.post('/api/submissions/:id/approve', async (req, res) => {
