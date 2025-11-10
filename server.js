@@ -6,7 +6,7 @@ const axios = require('axios'); // Убедитесь, что axios устано
 const { Pool } = require('pg');
 
 const app = express();
-const port = 3001; // Внутренний порт, который использует Render
+const port = process.env.PORT || 3001; // Внутренний порт, который использует Render
 
 // Проверка переменных окружения ---
 const requiredEnvVars = ['WEB_API_KEY', 'TELEGRAM_BOT_TOKEN', 'CHANNEL_CHAT_ID', 'DATABASE_URL'];
