@@ -91,16 +91,47 @@ app.post('/api/submissions', async (req, res) => {
 });
 
 // GET: Отдаем все заявки для сайта
-app.get('/api/submissions', async (req, res) => {
+app.get('/api/photo/:file_id', async (req, res) => {
+    const { file_id } = req.params;
+
+    // Проверка на всякий случай
+    if (!TELEGRAM_BOT_TOKEN) {
+        return res.status(500).send('Ошибка конфигурации сервера: отсутствует токен.');
+    }
+
     try {
-        const result = await pool.query("SELECT * FROM submissions WHERE status = 'pending' ORDER BY created_at DESC");
-        res.json({
-            message: "success",
-            data: result.rows
+        // 1. Запрашиваем у Telegram актуальный file_path для этого file_id
+        const getFileUrl = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getFile?file_id=${file_id}`;
+        const getFileResponse = await axios.get(getFileUrl);
+
+        if (!getFileResponse.data.ok) {
+            // Если Telegram не может найти файл по file_id
+            throw new Error(`Telegram API Error: ${getFileResponse.data.description}`);
+        }
+
+        const { file_path } = getFileResponse.data.result; // Получаем свежий путь
+
+        // 2. Теперь скачиваем файл по этому свежему пути
+        const telegramFileUrl = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${file_path}`;
+        
+        const photoResponse = await axios({
+            method: 'get',
+            url: telegramFileUrl,
+            responseType: 'stream'
         });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: err.message });
+
+        // 3. Отдаем картинку сайту
+        res.setHeader('Content-Type', photoResponse.headers['content-type']);
+        photoResponse.data.pipe(res);
+
+    } catch (error) {
+        console.error('Ошибка при получении фото из Telegram:', error.message);
+        // Отправляем более осмысленную ошибку
+        if (error.response && error.response.status === 404) {
+             res.status(404).send('Фото не найдено или срок его действия истек.');
+        } else {
+             res.status(500).send('Внутренняя ошибка сервера при получении фото.');
+        }
     }
 });
 
