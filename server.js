@@ -8,6 +8,16 @@ const { Pool } = require('pg');
 const app = express();
 const port = 3001; // Внутренний порт, который использует Render
 
+// Проверка переменных окружения ---
+const requiredEnvVars = ['WEB_API_KEY', 'TELEGRAM_BOT_TOKEN', 'CHANNEL_CHAT_ID', 'DATABASE_URL'];
+const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+    console.error('ОШИБКА: Отсутствуют обязательные переменные окружения:');
+    missingVars.forEach(varName => console.error(`- ${varName}`));
+    process.exit(1); // Завершаем работу сервера с кодом ошибки
+}
+
 // --- Настройка ---
 app.use(cors());
 app.use(express.json());
